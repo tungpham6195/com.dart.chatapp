@@ -1,16 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'dart:async';
-
+import 'package:firebase_database/ui/firebase_animated_list.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 void main() => runApp(new MyChat());
 
 final googleSignIn = new GoogleSignIn();
+final auth = FirebaseAuth.instance;
+final analytics = new FirebaseAnalytics();
 
 Future<Null> _ensureLoggedIn() async {
   GoogleSignInAccount user = googleSignIn.currentUser;
-  if (user == null) user = await googleSignIn.signInSilently();
+  if (user == null) {
+    user = await googleSignIn.signInSilently();
+    analytics.logLogin();     
+  }
   if (user == null) {
     await googleSignIn.signIn();
+    analytics.logLogin(); 
+  }
+  if (await auth.currentUser() == null) {
+    GoogleSignInAuthentication credentials =
+        await googleSignIn.currentUser.authentication;
+    await auth.signInWithGoogle(
+      idToken: credentials.idToken,
+      accessToken: credentials.accessToken,
+    );
   }
 }
 
@@ -31,8 +48,8 @@ class ChatScreen extends StatefulWidget {
   State createState() => new ChatScreenState();
 }
 
-class ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
-  final List<ChatMessage> _messages = <ChatMessage>[];
+class ChatScreenState extends State<ChatScreen> {
+  final reference = FirebaseDatabase.instance.reference().child('messages');
   final TextEditingController _messageController = new TextEditingController();
 
   void _handleSubmitted(String text) async {
@@ -43,17 +60,12 @@ class ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   void _sendMessage({String text}) {
-    ChatMessage message = new ChatMessage(
-      text: text,
-      animationController: new AnimationController(
-        duration: new Duration(milliseconds: 7 * 100),
-        vsync: this,
-      ),
-    );
-    setState(() {
-      _messages.insert(0, message);
+    reference.push().set({
+      'text': text,
+      'senderName': googleSignIn.currentUser.displayName,
+      'senderPhotoUrl': googleSignIn.currentUser.photoUrl,
     });
-    message.animationController.forward();
+    analytics.logEvent(name: 'send_message');
   }
 
   @override
@@ -66,11 +78,18 @@ class ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       body: new Column(
         children: <Widget>[
           new Flexible(
-            child: new ListView.builder(
+            child: new FirebaseAnimatedList(
+              query: reference,
+              sort: (a, b) => b.key.compareTo(a.key),
               padding: new EdgeInsets.all(8.0),
               reverse: true,
-              itemBuilder: (_, int index) => _messages[index],
-              itemCount: _messages.length,
+              itemBuilder:
+                  (_, DataSnapshot snapshot, Animation<double> animation) {
+                return new ChatMessage(
+                  snapshot: snapshot,
+                  animation: animation,
+                );
+              },
             ),
           ),
           new Divider(height: 1.0),
@@ -113,18 +132,16 @@ class ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 }
 
-const String _name = "Your Name";
-
 class ChatMessage extends StatelessWidget {
-  ChatMessage({this.text, this.animationController});
-  final String text;
-  final AnimationController animationController;
+  ChatMessage({this.snapshot, this.animation});
+  final DataSnapshot snapshot; // modified
+  final Animation animation;
   @override
   Widget build(BuildContext context) {
     return new SizeTransition(
       sizeFactor: new CurvedAnimation(
-        parent: animationController,
-        curve: Curves.fastOutSlowIn,
+        parent: animation,
+        curve: Curves.easeOut,
       ),
       axisAlignment: 0.0,
       child: new Container(
@@ -137,18 +154,18 @@ class ChatMessage extends StatelessWidget {
               child: new CircleAvatar(
                 // child: new Text(googleSignIn.currentUser.displayName),
                 backgroundImage:
-                    new NetworkImage(googleSignIn.currentUser.photoUrl),
+                    new NetworkImage(snapshot.value['senderPhotoUrl']),
               ),
             ),
             new Expanded(
               child: new Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  new Text(googleSignIn.currentUser.displayName,
+                  new Text(snapshot.value['senderName'],
                       style: Theme.of(context).textTheme.subhead),
                   new Container(
                     margin: const EdgeInsets.only(top: 5.0),
-                    child: new Text(text),
+                    child: new Text(snapshot.value['text']),
                   ),
                 ],
               ),
