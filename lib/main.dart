@@ -1,6 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'dart:async';
 
 void main() => runApp(new MyChat());
+
+final googleSignIn = new GoogleSignIn();
+
+Future<Null> _ensureLoggedIn() async {
+  GoogleSignInAccount user = googleSignIn.currentUser;
+  if (user == null) user = await googleSignIn.signInSilently();
+  if (user == null) {
+    await googleSignIn.signIn();
+  }
+}
 
 class MyChat extends StatelessWidget {
   @override
@@ -22,8 +34,15 @@ class ChatScreen extends StatefulWidget {
 class ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final List<ChatMessage> _messages = <ChatMessage>[];
   final TextEditingController _messageController = new TextEditingController();
-  void _handleSubmitted(String text) {
+
+  void _handleSubmitted(String text) async {
     _messageController.clear();
+
+    await _ensureLoggedIn();
+    _sendMessage(text: text);
+  }
+
+  void _sendMessage({String text}) {
     ChatMessage message = new ChatMessage(
       text: text,
       animationController: new AnimationController(
@@ -115,17 +134,24 @@ class ChatMessage extends StatelessWidget {
           children: <Widget>[
             new Container(
               margin: const EdgeInsets.only(right: 16.0),
-              child: new CircleAvatar(child: new Text(_name[0])),
+              child: new CircleAvatar(
+                // child: new Text(googleSignIn.currentUser.displayName),
+                backgroundImage:
+                    new NetworkImage(googleSignIn.currentUser.photoUrl),
+              ),
             ),
-            new Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                new Text(_name, style: Theme.of(context).textTheme.subhead),
-                new Container(
-                  margin: const EdgeInsets.only(top: 5.0),
-                  child: new Text(text),
-                ),
-              ],
+            new Expanded(
+              child: new Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  new Text(googleSignIn.currentUser.displayName,
+                      style: Theme.of(context).textTheme.subhead),
+                  new Container(
+                    margin: const EdgeInsets.only(top: 5.0),
+                    child: new Text(text),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
